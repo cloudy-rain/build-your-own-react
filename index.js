@@ -45,7 +45,7 @@ function createDom(fiber) {
     return dom;
 }
 function render(element, container) {
-    // 构造根fiber
+    // 每次调用render都会构造一个新的wipRoot, 用来表示work in press fiber root
     wipRoot = {
         dom: container,
         props: {
@@ -53,28 +53,33 @@ function render(element, container) {
         },
         alternate: currentRoot
     };
-    nextUnitOfWork = wipRoot;
-    deletions = [];
+    nextUnitOfWork = wipRoot; // 重置
+    deletions = []; // 重置
 }
 function commitRoot() {
     console.log("commitRoot");
     console.log(wipRoot);
+    // remove the "DELETION" effect in currentRoot
     deletions.forEach(commitWork);
-    // add nodes to dom
+    // "PLACEMENT" & "UPDATE" node
     commitWork(wipRoot.child);
     currentRoot = wipRoot; // 记录上一次commit的fiber tree
-    wipRoot = null;
+    wipRoot = null; // 当前的 ‘work in progress‘ 结束
 }
 function commitWork(fiber) {
     if (!fiber) {
         return;
     }
-    var domParent = fiber.parent.dom;
+    var domParentFiber = fiber.parent;
+    while (!domParentFiber.dom) {
+        domParentFiber = domParentFiber.parent;
+    }
+    var domParent = domParentFiber.dom;
     if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
         domParent.appendChild(fiber.dom);
     }
     else if (fiber.effectTag === "DELETION") {
-        domParent.removeChild(fiber.dom);
+        commitDeletion(fiber, domParent);
     }
     else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
         // And if it’s an UPDATE, we need to update the existing DOM node with the props that changed.
@@ -82,6 +87,14 @@ function commitWork(fiber) {
     }
     commitWork(fiber.child);
     commitWork(fiber.sibling);
+}
+function commitDeletion(fiber, domParent) {
+    if (fiber.dom) {
+        domParent.removeChild(fiber.dom);
+    }
+    else {
+        commitDeletion(fiber.child, domParent); // function component fiber 只会有一个child
+    }
 }
 var isEvent = function (key) { return key.startsWith("on"); };
 var isProperty = function (key) { return key !== "children" && !isEvent(key); };
@@ -121,16 +134,13 @@ function updateDom(dom, prevProps, nextProps) {
  * perform work & return next unit of work
  */
 function performUnitOfWork(fiber) {
-    // 1) create dom for fiber node
-    if (!fiber.dom) {
-        fiber.dom = createDom(fiber);
+    var isFunctionComponent = fiber.type instanceof Function;
+    if (isFunctionComponent) {
+        updateFunctionComponent(fiber);
     }
-    // if (fiber.parent) {
-    //   fiber.parent.dom.appendChild(fiber.dom);
-    // }
-    // 2) create children fibers
-    var elements = fiber.props.children;
-    reconcileChildren(fiber, elements);
+    else {
+        updateHostComponent(fiber);
+    }
     // 3) return next unit of work
     // child
     if (fiber.child) {
@@ -146,11 +156,27 @@ function performUnitOfWork(fiber) {
         nextFiber = nextFiber.parent;
     }
 }
-// 1. create new children fibers
-// 2. reconcile the old fibers with the new elements
-//    We iterate at the same time over the children of the old fiber (wipFiber.alternate) and
-//    the array of elements we want to reconcile.
-//    The element is the thing we want to render to the DOM and the oldFiber is what we rendered the last time.
+function updateFunctionComponent(fiber) {
+    var children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child
+    reconcileChildren(fiber, children);
+}
+function updateHostComponent(fiber) {
+    // 1) if no dom, create dom for fiber node
+    if (!fiber.dom) {
+        fiber.dom = createDom(fiber);
+    }
+    // 2) create children fibers
+    reconcileChildren(fiber, fiber.props.children);
+}
+/**
+ *
+ * @param wipFiber parent fiber
+ * @param elements children elements
+ * 1. create new f fibers from 'elements' for 'wipFiber'
+ * 2. reconcile the old fibers with the new elements
+ *  We iterate at the same time over the children of the old fiber (wipFiber.alternate) and the array of elements we want to reconcile.
+ *  The element is the thing we want to render to the DOM and the oldFiber is what we rendered the last time.
+ */
 function reconcileChildren(wipFiber, elements) {
     var index = 0;
     var oldFiber = wipFiber.alternate && wipFiber.alternate.child; // correspond to elements
@@ -199,10 +225,10 @@ function reconcileChildren(wipFiber, elements) {
         index++;
     }
 }
-var nextUnitOfWork = null; // fiber
-var wipRoot = null; // work in progress root
-var currentRoot = null;
-var deletions = null; // an array to keep track of the nodes we want to remove.
+var nextUnitOfWork = null; // piece of wipRoot
+var wipRoot = null; // work in progress fiber root
+var currentRoot = null; // last commit fiber root
+var deletions = null; // an array to keep track of the nodes we want to remove in currentRoot.
 function workLoop(deadline) {
     var shouldYield = false;
     while (nextUnitOfWork && !shouldYield) {
@@ -220,89 +246,140 @@ var Didact = {
     render: render
 };
 // jsx (use babel)-> React.createElement() -> 返回element对象
+// const element: ReactElement = {
+//   type: "div",
+//   props: {
+//     children: [
+//       {
+//         type: "h1",
+//         props: {
+//           title: "foo",
+//           children: [
+//             {
+//               type: "TEXT_ELEMENT",
+//               props: {
+//                 nodeValue: "hello world",
+//                 children: [],
+//               },
+//             },
+//           ],
+//         },
+//       },
+//       {
+//         type: "h1",
+//         props: {
+//           title: "foo",
+//           children: [
+//             {
+//               type: "TEXT_ELEMENT",
+//               props: {
+//                 nodeValue: "hello summer",
+//                 children: [],
+//               },
+//             },
+//           ],
+//         },
+//       },
+//     ],
+//   },
+// };
+// const element2: ReactElement = {
+//   type: "div",
+//   props: {
+//     children: [
+//       {
+//         type: "App1",
+//         props: {
+//           title: "foo",
+//           children: [
+//             {
+//               type: "TEXT_ELEMENT",
+//               props: {
+//                 nodeValue: "hello world",
+//                 children: [],
+//               },
+//             },
+//           ],
+//         },
+//       },
+//     ],
+//   },
+// };
+function Header(props) {
+    return {
+        type: "div",
+        props: {
+            children: [
+                {
+                    type: "TEXT_ELEMENT",
+                    props: {
+                        nodeValue: props.text,
+                        children: []
+                    }
+                },
+            ]
+        }
+    };
+}
+function Body(props) {
+    return {
+        type: "div",
+        props: {
+            children: [
+                {
+                    type: "TEXT_ELEMENT",
+                    props: {
+                        nodeValue: props.text,
+                        children: []
+                    }
+                },
+            ]
+        }
+    };
+}
+function Footer(props) {
+    return {
+        type: "div",
+        props: {
+            children: [
+                {
+                    type: "TEXT_ELEMENT",
+                    props: {
+                        nodeValue: props.text,
+                        children: []
+                    }
+                },
+            ]
+        }
+    };
+}
 var element = {
     type: "div",
     props: {
         children: [
             {
-                type: "h1",
+                type: Header,
                 props: {
-                    title: "foo",
-                    children: [
-                        {
-                            type: "TEXT_ELEMENT",
-                            props: {
-                                nodeValue: "hello world",
-                                children: []
-                            }
-                        },
-                    ]
+                    text: "Header",
+                    children: []
                 }
             },
             {
-                type: "h1",
+                type: Body,
                 props: {
-                    title: "foo",
-                    children: [
-                        {
-                            type: "TEXT_ELEMENT",
-                            props: {
-                                nodeValue: "hello summer",
-                                children: []
-                            }
-                        },
-                    ]
+                    text: "Body",
+                    children: []
+                }
+            },
+            {
+                type: Footer,
+                props: {
+                    text: "Footer",
+                    children: []
                 }
             },
         ]
     }
 };
-var element2 = {
-    type: "div",
-    props: {
-        children: [
-            {
-                type: "h1",
-                props: {
-                    title: "foo",
-                    children: [
-                        {
-                            type: "TEXT_ELEMENT",
-                            props: {
-                                nodeValue: "hello world",
-                                children: []
-                            }
-                        },
-                    ]
-                }
-            },
-            {
-                type: "p",
-                props: {
-                    title: "foo",
-                    children: [
-                        {
-                            type: "TEXT_ELEMENT",
-                            props: {
-                                nodeValue: "hello new day",
-                                children: []
-                            }
-                        },
-                    ]
-                }
-            },
-        ]
-    }
-};
-/** @jsx Didact.createElement */
-// const element = (
-//   <div style="background: salmon">
-//     <h1>Hello World</h1>
-//     <h2 style="text-align:right">from Didact</h2>
-//   </div>
-// );
 var container = document.getElementById("root");
 Didact.render(element, container);
-setTimeout(function () {
-    Didact.render(element2, container);
-}, 5000);

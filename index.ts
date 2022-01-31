@@ -38,7 +38,7 @@ function createDom(fiber) {
 }
 
 type ReactElement = {
-  type: string;
+  type: string | Function;
   props: { children: ReactElement[]; [k: string]: any };
 };
 
@@ -65,6 +65,9 @@ function render(element, container) {
 }
 
 function commitRoot() {
+  console.log("commitRoot");
+  console.log(wipRoot);
+
   // remove the "DELETION" effect in currentRoot
   deletions.forEach(commitWork);
 
@@ -80,12 +83,17 @@ function commitWork(fiber: Fiber) {
     return;
   }
 
-  const domParent = fiber.parent.dom;
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+
+  const domParent = domParentFiber.dom;
 
   if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
     domParent.appendChild(fiber.dom);
   } else if (fiber.effectTag === "DELETION") {
-    domParent.removeChild(fiber.dom);
+    commitDeletion(fiber, domParent);
   } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
     // And if it’s an UPDATE, we need to update the existing DOM node with the props that changed.
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
@@ -93,6 +101,14 @@ function commitWork(fiber: Fiber) {
 
   commitWork(fiber.child);
   commitWork(fiber.sibling);
+}
+
+function commitDeletion(fiber, domParent) {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child, domParent); // function component fiber 只会有一个child
+  }
 }
 
 const isEvent = (key) => key.startsWith("on");
@@ -137,14 +153,12 @@ function updateDom(dom, prevProps, nextProps) {
  * perform work & return next unit of work
  */
 function performUnitOfWork(fiber: Fiber) {
-  // 1) if no dom, create dom for fiber node
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
   }
-
-  // 2) create children fibers
-  const elements = fiber.props.children;
-  reconcileChildren(fiber, elements);
 
   // 3) return next unit of work
   // child
@@ -160,6 +174,20 @@ function performUnitOfWork(fiber: Fiber) {
     // uncle
     nextFiber = nextFiber.parent;
   }
+}
+function updateFunctionComponent(fiber) {
+  const children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child
+  reconcileChildren(fiber, children);
+}
+
+function updateHostComponent(fiber) {
+  // 1) if no dom, create dom for fiber node
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  // 2) create children fibers
+  reconcileChildren(fiber, fiber.props.children);
 }
 
 /**
@@ -306,37 +334,89 @@ const Didact = {
 //           ],
 //         },
 //       },
-//       {
-//         type: "App2",
-//         props: {
-//           title: "foo",
-//           children: [
-//             {
-//               type: "TEXT_ELEMENT",
-//               props: {
-//                 nodeValue: "hello new day",
-//                 children: [],
-//               },
-//             },
-//           ],
-//         },
-//       },
 //     ],
 //   },
 // };
 
-/** @jsx Didact.createElement */
-// const element = (
-//   <div style="background: salmon">
-//     <h1>Hello World</h1>
-//     <h2 style="text-align:right">from Didact</h2>
-//   </div>
-// );
-
-function App(props) {
-  return <h1>hi {props.name}</h1>;
+function Header(props): ReactElement {
+  return {
+    type: "div",
+    props: {
+      children: [
+        {
+          type: "TEXT_ELEMENT",
+          props: {
+            nodeValue: props.text,
+            children: [],
+          },
+        },
+      ],
+    },
+  };
 }
-const element = <App name="foo" />;
+
+function Body(props): ReactElement {
+  return {
+    type: "div",
+    props: {
+      children: [
+        {
+          type: "TEXT_ELEMENT",
+          props: {
+            nodeValue: props.text,
+            children: [],
+          },
+        },
+      ],
+    },
+  };
+}
+
+function Footer(props): ReactElement {
+  return {
+    type: "div",
+    props: {
+      children: [
+        {
+          type: "TEXT_ELEMENT",
+          props: {
+            nodeValue: props.text,
+            children: [],
+          },
+        },
+      ],
+    },
+  };
+}
+
+const element: ReactElement = {
+  type: "div",
+  props: {
+    children: [
+      {
+        type: Header,
+        props: {
+          text: "Header",
+          children: [],
+        },
+      },
+      {
+        type: Body,
+        props: {
+          text: "Body",
+          children: [],
+        },
+      },
+      {
+        type: Footer,
+        props: {
+          text: "Footer",
+          children: [],
+        },
+      },
+    ],
+  },
+};
 
 const container = document.getElementById("root");
 Didact.render(element, container);
