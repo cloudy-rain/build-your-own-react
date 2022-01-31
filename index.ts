@@ -1,4 +1,4 @@
-function createElement(type, props, ...children): ReactElement {
+function createElement(type, props?, ...children): ReactElement {
   return {
     type,
     props: {
@@ -49,6 +49,7 @@ type Fiber = ReactElement & {
   sibling?: Fiber;
   alternate?: Fiber;
   effectTag?: string;
+  hooks?: [];
 };
 
 function render(element, container) {
@@ -175,9 +176,47 @@ function performUnitOfWork(fiber: Fiber) {
     nextFiber = nextFiber.parent;
   }
 }
+
+let wipFiber = null;
+let hookIndex = null;
 function updateFunctionComponent(fiber) {
-  const children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = [];
+  const children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child. function component 无论如何都会执行
   reconcileChildren(fiber, children);
+}
+
+function useState(initial) {
+  const oldHook =
+    wipFiber.alternate &&
+    wipFiber.alternate.hooks &&
+    wipFiber.alternate.hooks[hookIndex];
+
+  const hook = {
+    state: oldHook ? oldHook.state : initial,
+    queue: [],
+  };
+
+  const actions = oldHook ? oldHook.queue : [];
+  actions.forEach((action) => {
+    hook.state = action(hook.state);
+  });
+
+  const setState = (action) => {
+    hook.queue.push(action);
+    wipRoot = {
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      alternate: currentRoot,
+    };
+    nextUnitOfWork = wipRoot;
+    deletions = [];
+  };
+
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state, setState];
 }
 
 function updateHostComponent(fiber) {
@@ -278,145 +317,17 @@ const Didact = {
 };
 
 // jsx (use babel)-> React.createElement() -> 返回element对象
-// const element: ReactElement = {
-//   type: "div",
-//   props: {
-//     children: [
-//       {
-//         type: "h1",
-//         props: {
-//           title: "foo",
-//           children: [
-//             {
-//               type: "TEXT_ELEMENT",
-//               props: {
-//                 nodeValue: "hello world",
-//                 children: [],
-//               },
-//             },
-//           ],
-//         },
-//       },
-//       {
-//         type: "h1",
-//         props: {
-//           title: "foo",
-//           children: [
-//             {
-//               type: "TEXT_ELEMENT",
-//               props: {
-//                 nodeValue: "hello summer",
-//                 children: [],
-//               },
-//             },
-//           ],
-//         },
-//       },
-//     ],
-//   },
-// };
-// const element2: ReactElement = {
-//   type: "div",
-//   props: {
-//     children: [
-//       {
-//         type: "App1",
-//         props: {
-//           title: "foo",
-//           children: [
-//             {
-//               type: "TEXT_ELEMENT",
-//               props: {
-//                 nodeValue: "hello world",
-//                 children: [],
-//               },
-//             },
-//           ],
-//         },
-//       },
-//     ],
-//   },
-// };
 
-function Header(props): ReactElement {
-  return {
-    type: "div",
-    props: {
-      children: [
-        {
-          type: "TEXT_ELEMENT",
-          props: {
-            nodeValue: props.text,
-            children: [],
-          },
-        },
-      ],
+function Counter() {
+  const [state, setState] = useState(1);
+  return Didact.createElement(
+    "h1",
+    {
+      onclick: () => setState((c) => c + 1),
     },
-  };
+    `Count: ${state}`
+  );
 }
-
-function Body(props): ReactElement {
-  return {
-    type: "div",
-    props: {
-      children: [
-        {
-          type: "TEXT_ELEMENT",
-          props: {
-            nodeValue: props.text,
-            children: [],
-          },
-        },
-      ],
-    },
-  };
-}
-
-function Footer(props): ReactElement {
-  return {
-    type: "div",
-    props: {
-      children: [
-        {
-          type: "TEXT_ELEMENT",
-          props: {
-            nodeValue: props.text,
-            children: [],
-          },
-        },
-      ],
-    },
-  };
-}
-
-const element: ReactElement = {
-  type: "div",
-  props: {
-    children: [
-      {
-        type: Header,
-        props: {
-          text: "Header",
-          children: [],
-        },
-      },
-      {
-        type: Body,
-        props: {
-          text: "Body",
-          children: [],
-        },
-      },
-      {
-        type: Footer,
-        props: {
-          text: "Footer",
-          children: [],
-        },
-      },
-    ],
-  },
-};
 
 const container = document.getElementById("root");
-Didact.render(element, container);
+Didact.render(Didact.createElement(Counter), container);
