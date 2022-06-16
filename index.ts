@@ -38,7 +38,7 @@ function createDom(fiber) {
 }
 
 type ReactElement = {
-  type: string | Function;
+  type?: string | Function;
   props: { children: ReactElement[]; [k: string]: any };
 };
 
@@ -152,6 +152,8 @@ function updateDom(dom, prevProps, nextProps) {
 
 /**
  * perform work & return next unit of work
+ * perform work: 1）create dom; 2)create the fibers for the element’s children
+ *
  */
 function performUnitOfWork(fiber: Fiber) {
   const isFunctionComponent = fiber.type instanceof Function;
@@ -186,7 +188,6 @@ function updateFunctionComponent(fiber) {
   const children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child. function component 无论如何都会执行
   reconcileChildren(fiber, children);
 }
-
 function useState(initial) {
   const oldHook =
     wipFiber.alternate &&
@@ -233,7 +234,7 @@ function updateHostComponent(fiber) {
  *
  * @param wipFiber parent fiber
  * @param elements children elements
- * 1. create new f fibers from 'elements' for 'wipFiber'
+ * 1. create new  fibers from 'elements' for 'wipFiber'
  * 2. reconcile the old fibers with the new elements
  *  We iterate at the same time over the children of the old fiber (wipFiber.alternate) and the array of elements we want to reconcile.
  *  The element is the thing we want to render to the DOM and the oldFiber is what we rendered the last time.
@@ -294,22 +295,26 @@ function reconcileChildren(wipFiber: Fiber, elements: ReactElement[]) {
   }
 }
 
-let nextUnitOfWork = null; // piece of wipRoot
-let wipRoot = null; // work in progress fiber root
-let currentRoot = null; // last commit fiber root
-let deletions = null; // an array to keep track of the nodes we want to remove in currentRoot.
+let nextUnitOfWork: Fiber = null; // piece of wipRoot，每一个fiber节点就是一个公共单元。
+let wipRoot: Fiber = null; // work in progress fiber root, 当前正在构造的fiber树的根fiber节点
+let currentRoot: Fiber = null; // last commit fiber root， 上一次commit(更新dom)的fiber树的根fiber节点
+let deletions: Fiber[] = null; // an array to keep track of the nodes we want to remove in currentRoot. 因为要删除的节点不会向添加和更新一样创建新的fiber节点，而wipRoot不包含old fiber， 所以需要额外的数据结构记录要被删除的旧节点。
 function workLoop(deadline) {
   let shouldYield = false;
+
+  // render阶段，不断调用performUnitOfWork构造fiber树，该阶段可中断。
   while (nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
     shouldYield = deadline.timeRemaining() < 1;
   }
+
+  // wipRoot根节点表示的fiber树已经全部构造完毕， 进入commit阶段（不能中断），更新dom
   if (!nextUnitOfWork && wipRoot) {
     commitRoot();
   }
   requestIdleCallback(workLoop);
 }
-requestIdleCallback(workLoop);
+requestIdleCallback(workLoop); // 类似setTimeout，不过调用的时间不是自己设置，而是浏览器在空闲的时候主动调用workLoop函数
 
 const Didact = {
   createElement,
@@ -317,9 +322,11 @@ const Didact = {
 };
 
 // jsx (use babel)-> React.createElement() -> 返回element对象
-
 function Counter() {
   const [state, setState] = useState(1);
+
+  // return <h1 onClick={() => setState((c) => c + 1)}>`Count: ${state}`</h1>
+
   return Didact.createElement(
     "h1",
     {
@@ -330,4 +337,5 @@ function Counter() {
 }
 
 const container = document.getElementById("root");
+// Didact.render(<Counter />, container);
 Didact.render(Didact.createElement(Counter), container);
