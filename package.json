@@ -5,5 +5,14 @@
   "license": "MIT",
   "dependencies": {
     "typescript": "^4.5.5"
+  },
+  "scripts": {
+    "watch:tsc": "tsc ts/index.ts --outFile ts/index.js --watch",
+    "watch:babel": "npx babel js/index.jsx --out-file js/index.js --watch"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.23.9",
+    "@babel/core": "^7.24.0",
+    "@babel/preset-react": "^7.23.3"
   }
 }

@@ -9,7 +9,6 @@ function createElement(type, props?, ...children): ReactElement {
     },
   };
 }
-
 function createTextElement(text): ReactElement {
   return {
     type: "TEXT_ELEMENT",

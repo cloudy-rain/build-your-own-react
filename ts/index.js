@@ -132,6 +132,8 @@ function updateDom(dom, prevProps, nextProps) {
 }
 /**
  * perform work & return next unit of work
+ * perform work: 1）create dom; 2)create the fibers for the element’s children
+ *
  */
 function performUnitOfWork(fiber) {
     var isFunctionComponent = fiber.type instanceof Function;
@@ -162,7 +164,7 @@ function updateFunctionComponent(fiber) {
     wipFiber = fiber;
     hookIndex = 0;
     wipFiber.hooks = [];
-    var children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child
+    var children = [fiber.type(fiber.props)]; // 妙蛙.  function component fiber 只会有一个child. function component 无论如何都会执行
     reconcileChildren(fiber, children);
 }
 function useState(initial) {
@@ -203,7 +205,7 @@ function updateHostComponent(fiber) {
  *
  * @param wipFiber parent fiber
  * @param elements children elements
- * 1. create new f fibers from 'elements' for 'wipFiber'
+ * 1. create new  fibers from 'elements' for 'wipFiber'
  * 2. reconcile the old fibers with the new elements
  *  We iterate at the same time over the children of the old fiber (wipFiber.alternate) and the array of elements we want to reconcile.
  *  The element is the thing we want to render to the DOM and the oldFiber is what we rendered the last time.
@@ -256,22 +258,24 @@ function reconcileChildren(wipFiber, elements) {
         index++;
     }
 }
-var nextUnitOfWork = null; // piece of wipRoot
-var wipRoot = null; // work in progress fiber root
-var currentRoot = null; // last commit fiber root
-var deletions = null; // an array to keep track of the nodes we want to remove in currentRoot.
+var nextUnitOfWork = null; // piece of wipRoot，每一个fiber节点就是一个公共单元。
+var wipRoot = null; // work in progress fiber root, 当前正在构造的fiber树的根fiber节点
+var currentRoot = null; // last commit fiber root， 上一次commit(更新dom)的fiber树的根fiber节点
+var deletions = null; // an array to keep track of the nodes we want to remove in currentRoot. 因为要删除的节点不会向添加和更新一样创建新的fiber节点，而wipRoot不包含old fiber， 所以需要额外的数据结构记录要被删除的旧节点。
 function workLoop(deadline) {
     var shouldYield = false;
+    // render阶段，不断调用performUnitOfWork构造fiber树，该阶段可中断。
     while (nextUnitOfWork && !shouldYield) {
         nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
         shouldYield = deadline.timeRemaining() < 1;
     }
+    // wipRoot根节点表示的fiber树已经全部构造完毕， 进入commit阶段（不能中断），更新dom
     if (!nextUnitOfWork && wipRoot) {
         commitRoot();
     }
     requestIdleCallback(workLoop);
 }
-requestIdleCallback(workLoop);
+requestIdleCallback(workLoop); // 类似setTimeout，不过调用的时间不是自己设置，而是浏览器在空闲的时候主动调用workLoop函数
 var Didact = {
     createElement: createElement,
     render: render
@@ -279,9 +283,11 @@ var Didact = {
 // jsx (use babel)-> React.createElement() -> 返回element对象
 function Counter() {
     var _a = useState(1), state = _a[0], setState = _a[1];
+    // return <h1 onClick={() => setState((c) => c + 1)}>`Count: ${state}`</h1>
     return Didact.createElement("h1", {
         onclick: function () { return setState(function (c) { return c + 1; }); }
     }, "Count: ".concat(state));
 }
 var container = document.getElementById("root");
+// Didact.render(<Counter />, container);
 Didact.render(Didact.createElement(Counter), container);
