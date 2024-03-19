@@ -1,53 +1,3 @@
-// const element1 = <h1 title="foo">hello</h1>
-// const element1 = createElement("h1", { title: "foo" }, "hello");
-// const element1 = {
-//   type: "h1",
-//   props: {
-//     title: "foo",
-//     children: "hello",
-//   },
-// };
-
-// const element = React.createElement(
-//     "div",
-//     { id: "foo" },
-//     React.createElement("span", null, "bar"),
-//     React.createElement("p")
-//   )
-// const element = React.createElement(
-//   "div",
-//   { id: "foo" },
-//   {
-//     type: "span",
-//     props: {
-//       children: [
-//         {
-//           type: "TEXT_ELEMENT",
-//           props: {
-//             nodeValue: "bar",
-//             children: [],
-//           },
-//         },
-//       ],
-//     },
-//   },
-//   {
-//     type: "p",
-//     props: {
-//       children: [],
-//     },
-//   }
-// );
-
-function createTextElement(text) {
-  return {
-    type: "TEXT_ELEMENT",
-    props: {
-      nodeValue: text,
-      children: []
-    }
-  };
-}
 function createElement(type, props, ...children) {
   return {
     type,
@@ -57,22 +7,215 @@ function createElement(type, props, ...children) {
     }
   };
 }
+function createTextElement(text) {
+  return {
+    type: "TEXT_ELEMENT",
+    props: {
+      nodeValue: text,
+      children: []
+    }
+  };
+}
+function createDom(fiber) {
+  const dom = fiber.type === "TEXT_ELEMENT" ? document.createTextNode("") : document.createElement(fiber.type);
+  updateDom(dom, {}, fiber.props);
+  return dom;
+}
+const isEvent = key => key.startsWith("on");
+const isProperty = key => key !== "children" && !isEvent(key);
+const isNew = (pre, next) => key => pre[key] !== next[key];
+const isGone = (pre, next) => key => !(key in next);
+function updateDom(dom, preProps, nextProps) {
+  // Remove old properties
+  Object.keys(preProps).filter(isProperty).filter(isGone(preProps, nextProps)).forEach(name => dom[name] = "");
+
+  // Remove old or changed event listeners
+  Object.keys(preProps).filter(isEvent).filter(key => isGone(preProps, nextProps)(key) || isNew(preProps, nextProps)(key)).forEach(name => {
+    const eventType = name.toLowerCase().substring(2);
+    dom.removeEventListener(eventType, preProps[name]);
+  });
+
+  // Add new properties
+  Object.keys(nextProps).filter(isProperty).filter(isNew(preProps, nextProps)).forEach(name => dom[name] = nextProps[name]);
+
+  // Add event listeners
+  Object.keys(nextProps).filter(isEvent).forEach(name => {
+    const eventType = name.toLowerCase().substring(2);
+    dom.addEventListener(eventType, nextProps[name]);
+  });
+}
+function commitRoot() {
+  console.log(wipRoot);
+  deletions.forEach(commitWork);
+  commitWork(wipRoot.child);
+  currentRoot = wipRoot;
+  wipRoot = null;
+}
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
+  }
+  const domParent = fiber.parent.dom;
+  if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
+    domParent.appendChild(fiber.dom);
+  } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
+    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+  } else if (fiber.effectTag === "DELETION") {
+    domParent.removeChild(fiber.dom);
+    return;
+  }
+  commitWork(fiber.child);
+  commitWork(fiber.sibling);
+}
+
+// In the render function we set nextUnitOfWork to the root of the fiber tree.
 function render(element, container) {
-  const dom = element.type === "TEXT_ELEMENT" ? document.createTextNode("") : document.createElement(element.type);
-  const isProperty = key => key !== "children";
-  Object.keys(element.props).filter(isProperty).forEach(name => dom[name] = element.props[name]);
-  element.props.children.forEach(child => render(child, dom));
-  container.appendChild(dom);
+  wipRoot = {
+    dom: container,
+    props: {
+      children: [element]
+    },
+    alternate: currentRoot // This property is a link to the old fiber,
+  };
+  deletions = [];
+  nextUnitOfWork = wipRoot;
+}
+let wipRoot = null; //  work in progress root
+let currentRoot = null; // last fiber tree we committed to the DOM
+let deletions = [];
+
+// So we are going to break the work into small units,
+// and after we finish each unit we’ll let the browser interrupt the rendering(通过shouldYield) if there’s anything else that needs to be done.
+let nextUnitOfWork = null;
+function workLoop(deadline) {
+  // console.log("-----------------workLoop--------------");
+  let shouldYield = false;
+
+  // console.log("---------before while---------");
+
+  // from: https://developer.mozilla.org/en-US/docs/Web/API/Background_Tasks_API#getting_the_most_out_of_idle_callbacks
+  // Window.requestIdleCallback() makes it possible to become actively engaged in helping to ensure that the browser's event loop runs smoothly,
+  // by allowing the browser to tell your code how much time it can safely use without causing the system to lag.
+  // !!!!If you stay within the limit given, you can make the user's experience much better.
+  // 循环结束条件: 没有工作单元了 或者 没有时间了
+  while (nextUnitOfWork && !shouldYield) {
+    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+    console.log(`deadline.timeRemaining(): ${deadline.timeRemaining()}`);
+    shouldYield = deadline.timeRemaining() < 1;
+  }
+  // console.log("---------break while---------", !!nextUnitOfWork, shouldYield);
+
+  // firber树构建完毕, 进入commit阶段
+  if (!nextUnitOfWork && wipRoot) {
+    commitRoot();
+  }
+
+  // You can call requestIdleCallback() within an idle callback function
+  // to schedule --another callback-- to take place no sooner than the next pass through the event loop.
+  // from: https://developer.mozilla.org/en-US/docs/Web/API/Window/requestIdleCallback
+  requestIdleCallback(workLoop);
+}
+
+// We use requestIdleCallback to make a loop.
+// You can think of requestIdleCallback as a setTimeout(都是异步, 不过一个是自己设定最小调用时间,一个是浏览器决定调用时间),
+// but instead of us telling it when to run,
+// the browser will run the callback when the main thread is idle.
+// React doesn’t use requestIdleCallback anymore. Now it uses the scheduler package. But for this use case it’s conceptually the same.
+// From React(https://github.com/facebook/react/issues/11171#issuecomment-417349573):
+// FWIW we've since stopped using requestIdleCallback because it's not as aggressive as we need. Instead we use a polyfill that's internally implemented on top of requestAnimationFrame. Although conceptually we still use it to do idle work.
+requestIdleCallback(workLoop);
+
+// not only performs the work but also returns the next unit of work
+function performUnitOfWork(fiber) {
+  // 1.create DOM
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  // 2.create the fibers for the element’s children
+  const elements = fiber.props.children;
+  reconcileChildren(fiber, elements);
+
+  // 3.select the next unit of work
+  // try with the child, then with the sibling, then with the uncle, and so on.
+  if (fiber.child) {
+    return fiber.child;
+  }
+  let nextFiber = fiber;
+  while (nextFiber) {
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    nextFiber = nextFiber.parent;
+  }
+}
+function reconcileChildren(wipFiber, elements) {
+  let index = 0;
+  let oldFiber = wipFiber?.alternate?.child;
+  let prevSibling = null;
+  while (index < elements.length || oldFiber != null) {
+    const element = elements[index];
+    let newFiber = null;
+    const sameType = oldFiber && element && element.type === oldFiber.type;
+    if (sameType) {
+      // UPDATE
+      newFiber = {
+        type: oldFiber.type,
+        dom: oldFiber.dom,
+        // keeping the DOM node from the old fiber
+        props: element.props,
+        // and the props from the element.
+        parent: wipFiber,
+        alternate: oldFiber,
+        //
+        effectTag: "UPDATE"
+      };
+    }
+    if (element && !sameType) {
+      // ADD
+      newFiber = {
+        type: element.type,
+        props: element.props,
+        dom: null,
+        parent: wipFiber,
+        alternate: null,
+        effectTag: "PLACEMENT"
+      };
+    }
+    if (oldFiber && !sameType) {
+      // DELETE
+      oldFiber.effectTag = "DELETION";
+      deletions.push(oldFiber);
+    }
+    if (oldFiber) {
+      oldFiber = oldFiber.sibling;
+    }
+    if (index === 0) {
+      wipFiber.child = newFiber;
+    } else {
+      prevSibling.sibling = newFiber;
+    }
+    prevSibling = newFiber;
+    index++;
+  }
 }
 const Didact = {
   createElement,
   render
 };
+const handleClick = () => {
+  Didact.render(Didact.createElement("div", {
+    id: "foo",
+    class: "foo"
+  }, "hhhh", Didact.createElement("span", null, "bar"), Didact.createElement("div", null, Didact.createElement("span", null, "a span")), Didact.createElement("a", null, "a")), container);
+};
 
 /** @jsx Didact.createElement */
 const element = Didact.createElement("div", {
   id: "foo"
-}, Didact.createElement("span", null, "bar"), Didact.createElement("p", null, "text"), Didact.createElement("button", null, "click"), "hhhh", Didact.createElement("input", null));
+}, "hhhh", Didact.createElement("span", null, "bar"), Didact.createElement("div", null, Didact.createElement("span", null, "a span")), Didact.createElement("button", {
+  onClick: handleClick
+}, "click"));
 // const element = {
 //   type: "div",
 //   props: {
