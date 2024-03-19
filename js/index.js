@@ -55,17 +55,28 @@ function commitWork(fiber) {
   if (!fiber) {
     return;
   }
-  const domParent = fiber.parent.dom;
+  let domParentFiber = fiber.parent;
+  while (!domParentFiber.dom) {
+    domParentFiber = domParentFiber.parent;
+  }
+  const domParent = domParentFiber.dom;
   if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
     domParent.appendChild(fiber.dom);
   } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
     updateDom(fiber.dom, fiber.alternate.props, fiber.props);
   } else if (fiber.effectTag === "DELETION") {
-    domParent.removeChild(fiber.dom);
+    commitDeletion(fiber, domParent);
     return;
   }
   commitWork(fiber.child);
   commitWork(fiber.sibling);
+}
+function commitDeletion(fiber, domParent) {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child, domParent);
+  }
 }
 
 // In the render function we set nextUnitOfWork to the root of the fiber tree.
@@ -127,14 +138,12 @@ requestIdleCallback(workLoop);
 
 // not only performs the work but also returns the next unit of work
 function performUnitOfWork(fiber) {
-  // 1.create DOM
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
+  const isFunctionComponent = fiber.type instanceof Function;
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
   }
-
-  // 2.create the fibers for the element’s children
-  const elements = fiber.props.children;
-  reconcileChildren(fiber, elements);
 
   // 3.select the next unit of work
   // try with the child, then with the sibling, then with the uncle, and so on.
@@ -148,6 +157,60 @@ function performUnitOfWork(fiber) {
     }
     nextFiber = nextFiber.parent;
   }
+}
+let wipFiber = null;
+let hookIndex = null;
+/**
+ * 1.running the function to get children
+ * 2.create the fibers for the element’s children --> reconcileChildren()
+ * @param {*} fiber
+ */
+function updateFunctionComponent(fiber) {
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = []; // to support calling useState several times in the same component.
+  const children = [fiber.type(fiber.props)];
+  reconcileChildren(fiber, children);
+}
+function useState(initial) {
+  const oldHook = wipFiber.alternate && wipFiber.alternate.hooks && wipFiber.alternate.hooks[hookIndex];
+  const hook = {
+    state: oldHook ? oldHook.state : initial,
+    queue: []
+  };
+  const actions = oldHook ? oldHook.queue : [];
+  actions.forEach(action => hook.state = action(hook.state)); //  apply actions one by one to the new hook state
+
+  const setState = action => {
+    hook.queue.push(action);
+    // start a new render phase.
+    wipRoot = {
+      dom: currentRoot.dom,
+      props: currentRoot.props,
+      // 仍旧用上一个children: [element] 渲染, 在reconcileChildren方法中所有的Fiber都被判定为UPDATE, 但是Fiber中的hooks中存放了一些新的数据, 所以页面依旧会更新
+      alternate: currentRoot // 上一个children: [element]渲染的
+    };
+    nextUnitOfWork = wipRoot;
+    deletions = [];
+  };
+  wipFiber.hooks.push(hook);
+  hookIndex++;
+  return [hook.state, setState];
+}
+/**
+ * 1.create DOM
+ * 2.create the fibers for the element’s children --> reconcileChildren()
+ * @param {*} fiber
+ */
+function updateHostComponent(fiber) {
+  // 1.create DOM
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  // 2.create the fibers for the element’s children
+  const elements = fiber.props.children;
+  reconcileChildren(fiber, elements);
 }
 function reconcileChildren(wipFiber, elements) {
   let index = 0;
@@ -201,7 +264,8 @@ function reconcileChildren(wipFiber, elements) {
 }
 const Didact = {
   createElement,
-  render
+  render,
+  useState
 };
 const handleClick = () => {
   Didact.render(Didact.createElement("div", {
@@ -209,8 +273,6 @@ const handleClick = () => {
     class: "foo"
   }, "hhhh", Didact.createElement("span", null, "bar"), Didact.createElement("div", null, Didact.createElement("span", null, "a span")), Didact.createElement("a", null, "a")), container);
 };
-
-/** @jsx Didact.createElement */
 const element = Didact.createElement("div", {
   id: "foo"
 }, "hhhh", Didact.createElement("span", null, "bar"), Didact.createElement("div", null, Didact.createElement("span", null, "a span")), Didact.createElement("button", {
@@ -262,5 +324,22 @@ const element = Didact.createElement("div", {
 //   )
 // );
 
+const handleClick2 = () => {
+  Didact.render(Didact.createElement(App, {
+    name: "bar"
+  }), container);
+};
+/** @jsx Didact.createElement */
+function App(props) {
+  return Didact.createElement("div", null, Didact.createElement("h1", null, "Hi ", props.name), Didact.createElement("button", {
+    onClick: handleClick2
+  }, "click"));
+}
+function Counter() {
+  const [state, setState] = Didact.useState(1);
+  return Didact.createElement("h1", {
+    onClick: () => setState(c => c + 1)
+  }, "Count: ", state);
+}
 const container = document.getElementById("root");
-Didact.render(element, container);
+Didact.render(Didact.createElement(Counter, null), container);
