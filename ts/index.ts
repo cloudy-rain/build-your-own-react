@@ -4,7 +4,7 @@ function createElement(type, props?, ...children): ReactElement {
     props: {
       ...props,
       children: children.map((child) =>
-        typeof child === "object" ? child : createTextElement(child)
+        typeof child === "object" ? child : createTextElement(child),
       ),
     },
   };
@@ -26,12 +26,8 @@ function createDom(fiber) {
     fiber.type == "TEXT_ELEMENT"
       ? document.createTextNode("")
       : document.createElement(fiber.type);
-  const isProperty = (key) => key !== "children";
-  Object.keys(fiber.props)
-    .filter(isProperty)
-    .forEach((name) => {
-      dom[name] = fiber.props[name];
-    });
+
+  updateDom(dom, {}, fiber.props);
 
   return dom;
 }
@@ -43,12 +39,19 @@ type ReactElement = {
 
 type Fiber = ReactElement & {
   dom?: any;
+
   parent?: Fiber;
   child?: Fiber;
   sibling?: Fiber;
+
   alternate?: Fiber;
   effectTag?: string;
-  hooks?: [];
+  hooks?: Hook[];
+};
+
+type Hook = {
+  state: any;
+  queue: Function[];
 };
 
 function render(element, container) {
@@ -331,7 +334,7 @@ function Counter() {
     {
       onclick: () => setState((c) => c + 1),
     },
-    `Count: ${state}`
+    `Count: ${state}`,
   );
 }
 
