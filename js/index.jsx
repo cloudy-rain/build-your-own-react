@@ -87,6 +87,7 @@ function commitWork(fiber) {
   }
   const domParent = domParentFiber.dom;
 
+  // fiber.dom != null会跳过funciton component
   if (fiber.effectTag === "PLACEMENT" && fiber.dom != null) {
     domParent.appendChild(fiber.dom);
   } else if (fiber.effectTag === "UPDATE" && fiber.dom != null) {
@@ -140,7 +141,7 @@ function workLoop(deadline) {
   // 循环结束条件: 没有工作单元了 或者 没有时间了
   while (nextUnitOfWork && !shouldYield) {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
-    console.log(`deadline.timeRemaining(): ${deadline.timeRemaining()}`);
+    console.log(`deadline.timeReamining(): ${deadline.timeRemaining()}`);
     shouldYield = deadline.timeRemaining() < 1;
   }
   // console.log("---------break while---------", !!nextUnitOfWork, shouldYield);
