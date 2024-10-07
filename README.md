@@ -45,7 +45,7 @@ https://pomb.us/build-your-own-react/
 ### 更新
 
 - 通过新的 ReactElement 再次设置适当的 wipRoot 和 nextUnitOfWork 来开启更新流程
-- 与初次渲染时一样多次执行 performUnitOfWork， 不过在更新的流程中执行 performUnitOfWork 并不会为 Fiber 节点创建 dom， 而是在构造 Fiber 的时候复用上一次 commit 时对应的 dom（如果有的话）
+- 与初次渲染时一样多次执行 performUnitOfWork， 不过在更新的流程中执行 performUnitOfWork 并不会每一次都为新Fiber 节点创建 dom， 而是在构造 Fiber 的时候复用上一次 commit 时对应的 dom（如果有的话）
 - 当没有下一个 Fiber 工作单元（nextUnitOfWork）要处理时， 整个 Fiber 树 构建完毕，每个 Fiber 节点上已经有对应的 dom
 - 执行 commitRoot，通过递归的方式将 Fiber 树的上每个节点对应的 dom 更新到页面上， 准确来说是对每一个 dom 节点根据之前的 props 和现在的 props 差异 做 dom 属性的修改
 
@@ -59,4 +59,4 @@ https://pomb.us/build-your-own-react/
 
 - performUnitOfWork 构造 Fiber 节点
   - 初次渲染阶段 currentRoot 为 null， 也就是 wipRoot.alternate 为 null，在构造 Fiber 的时候没有旧 Fiber 节点，所以根据 ReactElement 完全重新创建一个没有 dom 属性 的 Fiber， 之后如果以该 Fiber 为参数调用 performUnitOfWork，就会为它创建 dom
-  - 更新阶段 wipRoot.alternate 有效， 是上一次 commit 的 Fiber 树，在构造 Fiber 的时候可以根据 alternate 属性找到 旧 Fiber 节点，所以需要判断新 ReactElement 的 type 是否和旧 Fiber 节点 的 type 相同。 相同就标记为“UPDATE”重用旧 Fiber 节点 的 dom； 不同的话将新 Fiber 节点 标记为“PLACEMENT”，旧 Fiber 节点标记为“DELETE”
+  - 更新阶段 wipRoot.alternate 有效， 是上一次 commit 的 Fiber 树，在构造 Fiber 的时候可以根据 alternate 属性找到 旧 Fiber 节点，所以需要判断新 ReactElement 的 type 是否和旧 Fiber 节点 的 type 是否相同。 相同就标记为“UPDATE”重用旧 Fiber 节点 的 dom； 不同的话将新 Fiber 节点 标记为“PLACEMENT”，旧 Fiber 节点标记为“DELETE”.
